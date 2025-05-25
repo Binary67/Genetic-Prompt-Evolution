@@ -16,13 +16,14 @@ Client = AzureOpenAI(
     azure_endpoint=os.getenv("AZURE_OPENAI_ENDPOINT"),
 )
 
-def EvaluatePrompt(DataFrame: pd.DataFrame, Prompt: Dict) -> pd.DataFrame:
+def EvaluatePrompt(DataFrame: pd.DataFrame, Prompt: Dict, ClassificationLabels: list = None) -> pd.DataFrame:
     """
     Evaluate a prompt on a dataframe using Azure OpenAI.
     
     Args:
         DataFrame: Input dataframe containing data to classify
         Prompt: Prompt dictionary from PromptStructure.py
+        ClassificationLabels: List of valid classification labels
         
     Returns:
         DataFrame with additional 'prediction' column
@@ -72,8 +73,17 @@ def EvaluatePrompt(DataFrame: pd.DataFrame, Prompt: Dict) -> pd.DataFrame:
             # Extract prediction from response
             RawPrediction = Response.choices[0].message.content.strip()
             
-            # Search for the first occurrence of 'compliment' or 'development' (case-insensitive)
-            Match = re.search(r'\b(compliment|development)\b', RawPrediction, re.IGNORECASE)
+            # Build regex pattern dynamically from ClassificationLabels
+            if ClassificationLabels:
+                # Create pattern like: \b(compliment|development|neutral)\b
+                LabelPattern = '|'.join(re.escape(label) for label in ClassificationLabels)
+                Pattern = rf'\b({LabelPattern})\b'
+            else:
+                # Fallback to hardcoded pattern if no labels provided
+                Pattern = r'\b(compliment|development)\b'
+                
+            # Search for the first occurrence of any classification label (case-insensitive)
+            Match = re.search(Pattern, RawPrediction, re.IGNORECASE)
             
             if Match:
                 Prediction = Match.group(1).lower()  # Extract and lowercase the label
@@ -111,3 +121,64 @@ def CalculateFitnessScore(ResultDF: pd.DataFrame) -> float:
     Accuracy = Correct / Total * 100
     
     return Accuracy
+
+def EvaluateValidationWithBestPrompt(ValidationData: pd.DataFrame, BestPrompt: Dict, ClassificationLabels: list = None) -> Dict:
+    """
+    Evaluate validation data using the best prompt from final generation.
+    
+    Args:
+        ValidationData: DataFrame containing validation data with 'text' and 'label' columns
+        BestPrompt: Best prompt dictionary from evolution
+        ClassificationLabels: List of valid classification labels
+        
+    Returns:
+        Dict containing evaluation results and metrics
+    """
+    print("\n" + "="*50)
+    print("VALIDATION EVALUATION")
+    print("="*50)
+    
+    # Evaluate validation data with best prompt
+    ResultDF = EvaluatePrompt(ValidationData, BestPrompt, ClassificationLabels)
+    
+    # Calculate validation accuracy
+    ValidationAccuracy = CalculateFitnessScore(ResultDF)
+    
+    # Calculate per-class accuracy
+    ClassAccuracies = {}
+    for Label in ValidationData['label'].unique():
+        LabelMask = ValidationData['label'] == Label
+        LabelCorrect = (ResultDF.loc[LabelMask, 'label'] == ResultDF.loc[LabelMask, 'prediction']).sum()
+        LabelTotal = LabelMask.sum()
+        ClassAccuracies[Label] = (LabelCorrect / LabelTotal * 100) if LabelTotal > 0 else 0
+    
+    # Prepare results summary
+    Results = {
+        "OverallAccuracy": ValidationAccuracy,
+        "ClassAccuracies": ClassAccuracies,
+        "TotalSamples": len(ValidationData),
+        "CorrectPredictions": (ResultDF['label'] == ResultDF['prediction']).sum(),
+        "IncorrectPredictions": (ResultDF['label'] != ResultDF['prediction']).sum(),
+        "ResultDataFrame": ResultDF
+    }
+    
+    # Print validation results
+    print(f"\nValidation Results:")
+    print(f"Overall Accuracy: {ValidationAccuracy:.2f}%")
+    print(f"Total Samples: {Results['TotalSamples']}")
+    print(f"Correct Predictions: {Results['CorrectPredictions']}")
+    print(f"Incorrect Predictions: {Results['IncorrectPredictions']}")
+    
+    print(f"\n### Per-Class Accuracy: ###")
+    for Label, Accuracy in ClassAccuracies.items():
+        print(f"{Label}: {Accuracy:.2f}%")
+    
+    # Show misclassified examples
+    Misclassified = ResultDF[ResultDF['label'] != ResultDF['prediction']]
+    if len(Misclassified) > 0:
+        print(f"\nMisclassified Examples:")
+        for Index, Row in Misclassified.iterrows():
+            print(f"\nText: {Row['text']}")
+            print(f"Actual: {Row['label']}, Predicted: {Row['prediction']}")
+    
+    return Results
