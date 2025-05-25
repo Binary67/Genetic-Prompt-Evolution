@@ -1,5 +1,6 @@
 import pandas as pd
 from GPEvolution import RunEvolution
+from GPEvaluate import EvaluateValidationWithBestPrompt
 
 TrainingData = pd.DataFrame([
     {"text": "Great job on the project presentation", "label": "compliment"},
@@ -18,12 +19,17 @@ ValidationData = pd.DataFrame([
 if __name__ == "__main__":
 
     BestPrompt = RunEvolution(
-        TrainingData = TrainingData,
-        ValidationData = ValidationData,
+        InputData = TrainingData,
         ClassificationLabels = ["compliment", "development"],
         PopulationSize = 2,
         NumGenerations = 2,
         MutationRate = 0.3,
         EliteSize = 2,
         RoleAssignment = "You are an expert HR analyst specializing in employee feedback classification."
+    )
+    
+    # Evaluate validation data with the best prompt
+    ValidationResults = EvaluateValidationWithBestPrompt(
+        ValidationData = ValidationData,
+        BestPrompt = BestPrompt
     )

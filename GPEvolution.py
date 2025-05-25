@@ -7,8 +7,7 @@ import random
 import json
 
 def RunEvolution(
-    TrainingData: pd.DataFrame,
-    ValidationData: pd.DataFrame,
+    InputData: pd.DataFrame,
     ClassificationLabels: list,
     PopulationSize: int = 2,
     NumGenerations: int = 2,
@@ -21,7 +20,7 @@ def RunEvolution(
     
     Args:
         TrainingData: DataFrame with 'text' and 'label' columns for training
-        ValidationData: DataFrame with 'text' and 'label' columns for validation
+        InputData: DataFrame with 'text' and 'label' columns for validation
         ClassificationLabels: List of classification labels
         PopulationSize: Number of prompts in each generation
         NumGenerations: Number of generations to evolve
@@ -64,7 +63,7 @@ def RunEvolution(
         FitnessScores = []
         for i, PromptDict in enumerate(CurrentPopulation):
             print(f"\nEvaluating Individual {i+1}")
-            ResultDF = EvaluatePrompt(ValidationData, PromptDict)
+            ResultDF = EvaluatePrompt(InputData, PromptDict)
             Fitness = CalculateFitnessScore(ResultDF)
             FitnessScores.append(Fitness)
             print(f"Fitness: {Fitness:.2f}%")

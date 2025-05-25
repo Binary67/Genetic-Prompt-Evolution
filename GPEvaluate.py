@@ -111,3 +111,63 @@ def CalculateFitnessScore(ResultDF: pd.DataFrame) -> float:
     Accuracy = Correct / Total * 100
     
     return Accuracy
+
+def EvaluateValidationWithBestPrompt(ValidationData: pd.DataFrame, BestPrompt: Dict) -> Dict:
+    """
+    Evaluate validation data using the best prompt from final generation.
+    
+    Args:
+        ValidationData: DataFrame containing validation data with 'text' and 'label' columns
+        BestPrompt: Best prompt dictionary from evolution
+        
+    Returns:
+        Dict containing evaluation results and metrics
+    """
+    print("\n" + "="*50)
+    print("VALIDATION EVALUATION")
+    print("="*50)
+    
+    # Evaluate validation data with best prompt
+    ResultDF = EvaluatePrompt(ValidationData, BestPrompt)
+    
+    # Calculate validation accuracy
+    ValidationAccuracy = CalculateFitnessScore(ResultDF)
+    
+    # Calculate per-class accuracy
+    ClassAccuracies = {}
+    for Label in ValidationData['label'].unique():
+        LabelMask = ValidationData['label'] == Label
+        LabelCorrect = (ResultDF.loc[LabelMask, 'label'] == ResultDF.loc[LabelMask, 'prediction']).sum()
+        LabelTotal = LabelMask.sum()
+        ClassAccuracies[Label] = (LabelCorrect / LabelTotal * 100) if LabelTotal > 0 else 0
+    
+    # Prepare results summary
+    Results = {
+        "OverallAccuracy": ValidationAccuracy,
+        "ClassAccuracies": ClassAccuracies,
+        "TotalSamples": len(ValidationData),
+        "CorrectPredictions": (ResultDF['label'] == ResultDF['prediction']).sum(),
+        "IncorrectPredictions": (ResultDF['label'] != ResultDF['prediction']).sum(),
+        "ResultDataFrame": ResultDF
+    }
+    
+    # Print validation results
+    print(f"\nValidation Results:")
+    print(f"Overall Accuracy: {ValidationAccuracy:.2f}%")
+    print(f"Total Samples: {Results['TotalSamples']}")
+    print(f"Correct Predictions: {Results['CorrectPredictions']}")
+    print(f"Incorrect Predictions: {Results['IncorrectPredictions']}")
+    
+    print(f"\n### Per-Class Accuracy: ###")
+    for Label, Accuracy in ClassAccuracies.items():
+        print(f"{Label}: {Accuracy:.2f}%")
+    
+    # Show misclassified examples
+    Misclassified = ResultDF[ResultDF['label'] != ResultDF['prediction']]
+    if len(Misclassified) > 0:
+        print(f"\nMisclassified Examples:")
+        for Index, Row in Misclassified.iterrows():
+            print(f"\nText: {Row['text']}")
+            print(f"Actual: {Row['label']}, Predicted: {Row['prediction']}")
+    
+    return Results
