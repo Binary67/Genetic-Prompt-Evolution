@@ -95,3 +95,19 @@ def EvaluatePrompt(DataFrame: pd.DataFrame, Prompt: Dict) -> pd.DataFrame:
     ResultDF['raw_output'] = RawOutput
     
     return ResultDF
+
+def CalculateFitnessScore(ResultDF: pd.DataFrame) -> float:
+    """
+    Calculate fitness score (accuracy) from evaluation results.
+    
+    Args:
+        ResultDF: DataFrame containing 'label' and 'prediction' columns
+        
+    Returns:
+        float: Accuracy percentage (0-100)
+    """
+    Correct = (ResultDF['label'] == ResultDF['prediction']).sum()
+    Total = len(ResultDF)
+    Accuracy = Correct / Total * 100
+    
+    return Accuracy
