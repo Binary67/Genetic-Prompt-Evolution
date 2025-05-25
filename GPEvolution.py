@@ -63,7 +63,7 @@ def RunEvolution(
         FitnessScores = []
         for i, PromptDict in enumerate(CurrentPopulation):
             print(f"\nEvaluating Individual {i+1}")
-            ResultDF = EvaluatePrompt(InputData, PromptDict)
+            ResultDF = EvaluatePrompt(InputData, PromptDict, ClassificationLabels)
             Fitness = CalculateFitnessScore(ResultDF)
             FitnessScores.append(Fitness)
             print(f"Fitness: {Fitness:.2f}%")

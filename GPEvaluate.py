@@ -16,13 +16,14 @@ Client = AzureOpenAI(
     azure_endpoint=os.getenv("AZURE_OPENAI_ENDPOINT"),
 )
 
-def EvaluatePrompt(DataFrame: pd.DataFrame, Prompt: Dict) -> pd.DataFrame:
+def EvaluatePrompt(DataFrame: pd.DataFrame, Prompt: Dict, ClassificationLabels: list = None) -> pd.DataFrame:
     """
     Evaluate a prompt on a dataframe using Azure OpenAI.
     
     Args:
         DataFrame: Input dataframe containing data to classify
         Prompt: Prompt dictionary from PromptStructure.py
+        ClassificationLabels: List of valid classification labels
         
     Returns:
         DataFrame with additional 'prediction' column
@@ -72,8 +73,17 @@ def EvaluatePrompt(DataFrame: pd.DataFrame, Prompt: Dict) -> pd.DataFrame:
             # Extract prediction from response
             RawPrediction = Response.choices[0].message.content.strip()
             
-            # Search for the first occurrence of 'compliment' or 'development' (case-insensitive)
-            Match = re.search(r'\b(compliment|development)\b', RawPrediction, re.IGNORECASE)
+            # Build regex pattern dynamically from ClassificationLabels
+            if ClassificationLabels:
+                # Create pattern like: \b(compliment|development|neutral)\b
+                LabelPattern = '|'.join(re.escape(label) for label in ClassificationLabels)
+                Pattern = rf'\b({LabelPattern})\b'
+            else:
+                # Fallback to hardcoded pattern if no labels provided
+                Pattern = r'\b(compliment|development)\b'
+                
+            # Search for the first occurrence of any classification label (case-insensitive)
+            Match = re.search(Pattern, RawPrediction, re.IGNORECASE)
             
             if Match:
                 Prediction = Match.group(1).lower()  # Extract and lowercase the label
@@ -112,13 +122,14 @@ def CalculateFitnessScore(ResultDF: pd.DataFrame) -> float:
     
     return Accuracy
 
-def EvaluateValidationWithBestPrompt(ValidationData: pd.DataFrame, BestPrompt: Dict) -> Dict:
+def EvaluateValidationWithBestPrompt(ValidationData: pd.DataFrame, BestPrompt: Dict, ClassificationLabels: list = None) -> Dict:
     """
     Evaluate validation data using the best prompt from final generation.
     
     Args:
         ValidationData: DataFrame containing validation data with 'text' and 'label' columns
         BestPrompt: Best prompt dictionary from evolution
+        ClassificationLabels: List of valid classification labels
         
     Returns:
         Dict containing evaluation results and metrics
@@ -128,7 +139,7 @@ def EvaluateValidationWithBestPrompt(ValidationData: pd.DataFrame, BestPrompt: D
     print("="*50)
     
     # Evaluate validation data with best prompt
-    ResultDF = EvaluatePrompt(ValidationData, BestPrompt)
+    ResultDF = EvaluatePrompt(ValidationData, BestPrompt, ClassificationLabels)
     
     # Calculate validation accuracy
     ValidationAccuracy = CalculateFitnessScore(ResultDF)
