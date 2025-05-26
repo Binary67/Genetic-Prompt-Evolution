@@ -4,6 +4,7 @@ from PromptStructure import GeneratePromptSample, ParsePromptWithDelimiter, Comb
 from openai import AzureOpenAI
 import os
 from dotenv import load_dotenv
+import pandas as pd
 
 # Load environment variables from .env file
 load_dotenv()
@@ -51,7 +52,7 @@ def Crossover(Parent1: Dict, Parent2: Dict) -> Dict:
     
     return Offspring
 
-def Mutation(Individual: Dict, MutationRate: float = 0.3, ClassificationLabels: List[str] = None) -> Dict:
+def Mutation(Individual: Dict, MutationRate: float = 0.3, ClassificationLabels: List[str] = None, WrongPredictions: pd.DataFrame = None) -> Dict:
     """
     Perform mutation on an individual prompt.
     
@@ -59,6 +60,7 @@ def Mutation(Individual: Dict, MutationRate: float = 0.3, ClassificationLabels: 
     - Individual: Prompt dictionary to mutate
     - MutationRate: Probability of mutating each component (default 0.3)
     - ClassificationLabels: List of classification labels for context
+    - WrongPredictions: DataFrame containing misclassified examples
     
     Returns:
     - Mutated prompt dictionary
@@ -82,26 +84,42 @@ def Mutation(Individual: Dict, MutationRate: float = 0.3, ClassificationLabels: 
     for Key in PromptKeys:
         if random.random() < MutationRate:
             # Mutate this component by generating a new version
-            Mutated[Key] = MutateComponent(Key, Individual[Key], ClassificationLabels)
+            Mutated[Key] = MutateComponent(Key, Individual[Key], ClassificationLabels, WrongPredictions)
     
     return Mutated
 
-def MutateComponent(ComponentName: str, OriginalValue: str, ClassificationLabels: List[str] = None) -> str:
+def MutateComponent(ComponentName: str, OriginalValue: str, ClassificationLabels: List[str] = None, WrongPredictions: pd.DataFrame = None) -> str:
     """
-    Mutate a specific prompt component using LLM.
+    Mutate a specific prompt component using LLM with error guidance.
     
     Parameters:
     - ComponentName: Name of the component to mutate
     - OriginalValue: Original value of the component
     - ClassificationLabels: List of classification labels for context
+    - WrongPredictions: DataFrame containing misclassified examples
     
     Returns:
     - Mutated component string
     """
     SystemMessage = {
         "role": "system",
-        "content": "You are a prompt engineering expert specializing in creating variations of prompt components."
+        "content": "You are a prompt engineering expert specializing in creating variations of prompt components that fix classification errors."
     }
+    
+    # Build error context if wrong predictions are provided
+    ErrorContext = ""
+    if WrongPredictions is not None and len(WrongPredictions) > 0:
+        # Sample up to 5 wrong predictions for context
+        SampleErrors = WrongPredictions.sample(min(5, len(WrongPredictions)))
+        ErrorExamples = []
+        for _, Row in SampleErrors.iterrows():
+            ErrorExamples.append(f"- Text: \"{Row['text']}\"\n  Actual: {Row['label']}, Predicted: {Row['prediction']}")
+        
+        ErrorContext = (
+            f"\n\nIMPORTANT: The current prompt misclassified these examples:\n"
+            + "\n".join(ErrorExamples)
+            + f"\n\nThe mutation should specifically address these misclassifications."
+        )
     
     UserMessage = {
         "role": "user",
@@ -112,7 +130,8 @@ def MutateComponent(ComponentName: str, OriginalValue: str, ClassificationLabels
             f"Create a different version that maintains the same purpose but uses different wording, "
             f"structure, or approach. The variation should be meaningful and not just a minor rephrasing.\n"
             + (f"Context: This is for a classification task with labels: {', '.join(ClassificationLabels)}\n" if ClassificationLabels else "")
-            + f"Output ONLY the new component text, nothing else."
+            + ErrorContext
+            + f"\n\nOutput ONLY the new component text, nothing else."
         )
     }
     
@@ -131,7 +150,7 @@ def MutateComponent(ComponentName: str, OriginalValue: str, ClassificationLabels
         # Return original value if mutation fails
         return OriginalValue
 
-def TournamentSelection(Population: List[Dict], FitnessScores: List[float], TournamentSize: int = 3) -> Dict:
+def TournamentSelection(Population: List[Dict], FitnessScores: List[float], TournamentSize: int = 3, ReturnIndex: bool = False):
     """
     Select an individual from the population using tournament selection.
     
@@ -139,9 +158,10 @@ def TournamentSelection(Population: List[Dict], FitnessScores: List[float], Tour
     - Population: List of prompt dictionaries
     - FitnessScores: List of fitness scores corresponding to each individual
     - TournamentSize: Number of individuals to compete in each tournament
+    - ReturnIndex: If True, return the index instead of the individual
     
     Returns:
-    - Selected individual
+    - Selected individual or index
     """
     # Randomly select tournament participants
     TournamentIndices = random.sample(range(len(Population)), min(TournamentSize, len(Population)))
@@ -155,4 +175,6 @@ def TournamentSelection(Population: List[Dict], FitnessScores: List[float], Tour
             BestFitness = FitnessScores[Index]
             BestIndex = Index
     
+    if ReturnIndex:
+        return BestIndex
     return Population[BestIndex]

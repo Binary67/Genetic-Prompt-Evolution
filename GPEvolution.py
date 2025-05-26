@@ -1,6 +1,6 @@
 import pandas as pd
 from PromptStructure import GeneratePromptSample, CombineString
-from GPEvaluate import EvaluatePrompt, CalculateFitnessScore
+from GPEvaluate import EvaluatePrompt, CalculateFitnessScore, GetWrongPredictions
 from GPPopulation import GeneratePopulation
 from GPOperation import Crossover, Mutation, TournamentSelection
 import random
@@ -61,21 +61,33 @@ def RunEvolution(
         
         # Evaluate current population
         FitnessScores = []
+        WrongPredictionsList = []  # Track wrong predictions for each individual
+        
         for i, PromptDict in enumerate(CurrentPopulation):
             print(f"\nEvaluating Individual {i+1}")
             ResultDF = EvaluatePrompt(InputData, PromptDict, ClassificationLabels)
             Fitness = CalculateFitnessScore(ResultDF)
             FitnessScores.append(Fitness)
+            
+            # Collect wrong predictions for this individual
+            WrongPredictions = GetWrongPredictions(ResultDF)
+            WrongPredictionsList.append(WrongPredictions)
+            
             print(f"Fitness: {Fitness:.2f}%")
+            print(f"Wrong predictions: {len(WrongPredictions)}")
             
             # Track all-time best
             if Fitness > AllTimeBestFitness:
                 AllTimeBestFitness = Fitness
                 AllTimeBestPrompt = PromptDict.copy()
         
-        # Sort population by fitness
-        PopulationWithFitness = list(zip(CurrentPopulation, FitnessScores))
-        PopulationWithFitness.sort(key=lambda x: x[1], reverse=True)
+        # Sort population by fitness (include wrong predictions)
+        PopulationWithFitnessAndErrors = list(zip(CurrentPopulation, FitnessScores, WrongPredictionsList))
+        PopulationWithFitnessAndErrors.sort(key=lambda x: x[1], reverse=True)
+        
+        # Extract sorted lists
+        PopulationWithFitness = [(x[0], x[1]) for x in PopulationWithFitnessAndErrors]
+        SortedWrongPredictions = [x[2] for x in PopulationWithFitnessAndErrors]
         
         # Report generation statistics
         GenerationBest = PopulationWithFitness[0][1]
@@ -110,15 +122,28 @@ def RunEvolution(
         
         # Generate offspring to fill rest of population
         while len(NextPopulation) < PopulationSize:
-            # Tournament selection for parents
-            Parent1 = TournamentSelection(CurrentPopulation, FitnessScores, TournamentSize=3)
-            Parent2 = TournamentSelection(CurrentPopulation, FitnessScores, TournamentSize=3)
+            # Tournament selection for parents (returns index)
+            Parent1Idx = TournamentSelection(CurrentPopulation, FitnessScores, TournamentSize=3, ReturnIndex=True)
+            Parent2Idx = TournamentSelection(CurrentPopulation, FitnessScores, TournamentSize=3, ReturnIndex=True)
+            
+            Parent1 = CurrentPopulation[Parent1Idx]
+            Parent2 = CurrentPopulation[Parent2Idx]
+            
+            # Get wrong predictions from parents (combine them for mutation guidance)
+            Parent1Errors = WrongPredictionsList[Parent1Idx]
+            Parent2Errors = WrongPredictionsList[Parent2Idx]
+            
+            # Handle case where both parents have empty error DataFrames
+            if len(Parent1Errors) == 0 and len(Parent2Errors) == 0:
+                CombinedErrors = pd.DataFrame()
+            else:
+                CombinedErrors = pd.concat([Parent1Errors, Parent2Errors]).drop_duplicates()
             
             # Crossover
             Offspring = Crossover(Parent1, Parent2)
             
-            # Mutation
-            Offspring = Mutation(Offspring, MutationRate, ClassificationLabels)
+            # Mutation with error guidance
+            Offspring = Mutation(Offspring, MutationRate, ClassificationLabels, WrongPredictions=CombinedErrors)
             
             NextPopulation.append(Offspring)
         

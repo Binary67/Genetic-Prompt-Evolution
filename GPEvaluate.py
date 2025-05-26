@@ -61,40 +61,67 @@ def EvaluatePrompt(DataFrame: pd.DataFrame, Prompt: Dict, ClassificationLabels: 
             {"role": "user", "content": CurrentPrompt}
         ]
         
-        try:
-            # Call Azure OpenAI
-            Response = Client.chat.completions.create(
-                model=os.getenv("AZURE_OPENAI_DEPLOYMENT"),
-                messages=Messages,
-                temperature=0,  # Use 0 for consistent classification
-                max_tokens=100  # Limit response length for classification
-            )
-            
-            # Extract prediction from response
-            RawPrediction = Response.choices[0].message.content.strip()
-            
-            # Build regex pattern dynamically from ClassificationLabels
-
-            LabelPattern = '|'.join(re.escape(label) for label in ClassificationLabels)
-            Pattern = rf'\b({LabelPattern})\b'
+        # Retry logic - up to 25 attempts
+        MaxRetries = 25
+        RetryCount = 0
+        Success = False
+        
+        while RetryCount < MaxRetries and not Success:
+            try:
+                # Prepare messages for current attempt - create a fresh copy each time
+                CurrentMessages = [{"role": "user", "content": Messages[0]["content"]}]
                 
-            # Search for the first occurrence of any classification label (case-insensitive)
-            Match = re.search(Pattern, RawPrediction, re.IGNORECASE)
-            
-            if Match:
-                Prediction = Match.group(1).lower()  # Extract and lowercase the label
-            else:
-                # If no match found, default to error
-                Prediction = "ERROR: No label found"
-                print(f"Warning: Could not extract label from response: {RawPrediction[:100]}...")
+                # If this is a retry, add emphasis message about using only given labels
+                if RetryCount > 0:
+                    EmphasisMessage = f"\nIMPORTANT: You MUST respond with ONLY one of these exact labels: {', '.join(ClassificationLabels)}. Do not use any other words or labels."
+                    CurrentMessages[0]["content"] += EmphasisMessage
                 
-            Predictions.append(Prediction)
-            RawOutput.append(RawPrediction)
-            
-        except Exception as E:
-            # Handle errors gracefully
-            print(f"Error processing row {Index}: {str(E)}")
-            Predictions.append("ERROR")
+                # Call Azure OpenAI
+                Response = Client.chat.completions.create(
+                    model=os.getenv("AZURE_OPENAI_DEPLOYMENT"),
+                    messages=CurrentMessages,
+                    temperature=0,  # Use 0 for consistent classification
+                    max_tokens=100  # Limit response length for classification
+                )
+                
+                # Extract prediction from response
+                RawPrediction = Response.choices[0].message.content.strip()
+                
+                # Build regex pattern dynamically from ClassificationLabels
+                LabelPattern = '|'.join(re.escape(label) for label in ClassificationLabels)
+                Pattern = rf'\b({LabelPattern})\b'
+                    
+                # Search for the first occurrence of any classification label (case-insensitive)
+                Match = re.search(Pattern, RawPrediction, re.IGNORECASE)
+                
+                if Match:
+                    Prediction = Match.group(1).lower()  # Extract and lowercase the label
+                    Success = True
+                else:
+                    # If no match found, retry
+                    RetryCount += 1
+                    if RetryCount < MaxRetries:
+                        print(f"Warning: Could not extract label from response (attempt {RetryCount}): {RawPrediction}")
+                    else:
+                        # Max retries reached
+                        Prediction = "ERROR: No label found after 25 attempts"
+                        print(f"Error: Could not extract label after {MaxRetries} attempts. Last response: {RawPrediction}")
+                        Success = True  # Exit loop
+                
+            except Exception as E:
+                # Handle API errors
+                RetryCount += 1
+                if RetryCount < MaxRetries:
+                    print(f"Error processing row {Index} (attempt {RetryCount}): {str(E)}")
+                else:
+                    # Max retries reached
+                    print(f"Error processing row {Index} after {MaxRetries} attempts: {str(E)}")
+                    Prediction = "ERROR"
+                    RawPrediction = f"API Error: {str(E)}"
+                    Success = True  # Exit loop
+        
+        Predictions.append(Prediction)
+        RawOutput.append(RawPrediction)
     
     # Add predictions to the dataframe
     ResultDF['prediction'] = Predictions
@@ -117,6 +144,19 @@ def CalculateFitnessScore(ResultDF: pd.DataFrame) -> float:
     Accuracy = Correct / Total * 100
     
     return Accuracy
+
+def GetWrongPredictions(ResultDF: pd.DataFrame) -> pd.DataFrame:
+    """
+    Extract wrong predictions from evaluation results.
+    
+    Args:
+        ResultDF: DataFrame containing evaluation results
+        
+    Returns:
+        DataFrame containing only misclassified examples
+    """
+    WrongPredictions = ResultDF[ResultDF['label'] != ResultDF['prediction']].copy()
+    return WrongPredictions
 
 def EvaluateValidationWithBestPrompt(ValidationData: pd.DataFrame, BestPrompt: Dict, ClassificationLabels: list = None) -> Dict:
     """
