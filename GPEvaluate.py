@@ -54,7 +54,7 @@ def EvaluatePrompt(DataFrame: pd.DataFrame, Prompt: Dict, ClassificationLabels: 
             TextToClassify = str(Row.to_dict())
         
         # Append the text to classify at the end of the prompt
-        CurrentPrompt = CurrentPrompt + "\n\nText to classify: " + TextToClassify
+        CurrentPrompt = CurrentPrompt + "\n\n<INPUT_TEXT>Text to classify: " + TextToClassify + "</INPUT_TEXT>"
         
         # Create messages for Azure OpenAI
         Messages = [
@@ -73,15 +73,14 @@ def EvaluatePrompt(DataFrame: pd.DataFrame, Prompt: Dict, ClassificationLabels: 
                 
                 # If this is a retry, add emphasis message about using only given labels
                 if RetryCount > 0:
-                    EmphasisMessage = f"\nIMPORTANT: You MUST respond with ONLY one of these exact labels: {', '.join(ClassificationLabels)}. Do not use any other words or labels."
+                    EmphasisMessage = f"\nIMPORTANT: Your output MUST be ONLY one of these exact labels: {', '.join(ClassificationLabels)}. Do not use any other words or labels. If the input text is unclear or ambiguous, classify it as 'no_aspiration'."
                     CurrentMessages[0]["content"] += EmphasisMessage
                 
                 # Call Azure OpenAI
                 Response = Client.chat.completions.create(
                     model=os.getenv("AZURE_OPENAI_DEPLOYMENT"),
                     messages=CurrentMessages,
-                    temperature=0,  # Use 0 for consistent classification
-                    max_tokens=100  # Limit response length for classification
+                    temperature=0.5,  # Use 0 for consistent classification
                 )
                 
                 # Extract prediction from response

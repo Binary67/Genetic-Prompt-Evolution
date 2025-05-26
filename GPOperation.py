@@ -90,7 +90,7 @@ def Mutation(Individual: Dict, MutationRate: float = 0.3, ClassificationLabels: 
 
 def MutateComponent(ComponentName: str, OriginalValue: str, ClassificationLabels: List[str] = None, WrongPredictions: pd.DataFrame = None) -> str:
     """
-    Mutate a specific prompt component using LLM with error guidance.
+    Mutate a specific prompt component using LLM with error analysis and targeted fixes.
     
     Parameters:
     - ComponentName: Name of the component to mutate
@@ -101,9 +101,14 @@ def MutateComponent(ComponentName: str, OriginalValue: str, ClassificationLabels
     Returns:
     - Mutated component string
     """
+    # If we have wrong predictions, first analyze why they failed
+    ErrorAnalysis = ""
+    if WrongPredictions is not None and len(WrongPredictions) > 0:
+        ErrorAnalysis = AnalyzeClassificationErrors(WrongPredictions, OriginalValue, ComponentName, ClassificationLabels)
+    
     SystemMessage = {
         "role": "system",
-        "content": "You are a prompt engineering expert specializing in creating variations of prompt components that fix classification errors."
+        "content": "You are a prompt engineering expert specializing in creating variations of prompt components that fix classification errors based on error analysis."
     }
     
     # Build error context if wrong predictions are provided
@@ -118,17 +123,18 @@ def MutateComponent(ComponentName: str, OriginalValue: str, ClassificationLabels
         ErrorContext = (
             f"\n\nIMPORTANT: The current prompt misclassified these examples:\n"
             + "\n".join(ErrorExamples)
-            + f"\n\nThe mutation should specifically address these misclassifications."
+            + f"\n\nError Analysis:\n{ErrorAnalysis}\n"
+            + f"\n\nThe mutation should specifically address the identified issues."
         )
     
     UserMessage = {
         "role": "user",
         "content": (
-            f"Create a variation of the following prompt component.\n"
+            f"Create an improved variation of the following prompt component based on the error analysis.\n"
             f"Component Type: {ComponentName}\n"
             f"Original:\n{OriginalValue}\n\n"
-            f"Create a different version that maintains the same purpose but uses different wording, "
-            f"structure, or approach. The variation should be meaningful and not just a minor rephrasing.\n"
+            f"Create a different version that specifically addresses the identified issues while maintaining the same purpose.\n"
+            f"Focus on fixing the root causes of misclassifications identified in the error analysis.\n"
             + (f"Context: This is for a classification task with labels: {', '.join(ClassificationLabels)}\n" if ClassificationLabels else "")
             + ErrorContext
             + f"\n\nOutput ONLY the new component text, nothing else."
@@ -149,6 +155,60 @@ def MutateComponent(ComponentName: str, OriginalValue: str, ClassificationLabels
         print(f"Mutation failed for {ComponentName}: {str(e)}")
         # Return original value if mutation fails
         return OriginalValue
+
+def AnalyzeClassificationErrors(WrongPredictions: pd.DataFrame, OriginalComponent: str, ComponentName: str, ClassificationLabels: List[str] = None) -> str:
+    """
+    Analyze why classifications failed to guide targeted mutations.
+    
+    Parameters:
+    - WrongPredictions: DataFrame containing misclassified examples
+    - OriginalComponent: The original component value
+    - ComponentName: Name of the component being analyzed
+    - ClassificationLabels: List of classification labels for context
+    
+    Returns:
+    - Analysis of error patterns and suggested improvements
+    """
+    SystemMessage = {
+        "role": "system",
+        "content": "You are an expert at analyzing classification errors and identifying patterns in misclassifications."
+    }
+    
+    # Sample errors for analysis
+    SampleErrors = WrongPredictions.sample(min(10, len(WrongPredictions)))
+    ErrorExamples = []
+    for _, Row in SampleErrors.iterrows():
+        ErrorExamples.append(f"- Text: \"{Row['text']}\"\n  Actual: {Row['label']}, Predicted: {Row['prediction']}")
+    
+    UserMessage = {
+        "role": "user",
+        "content": (
+            f"Analyze these classification errors and identify why they might have occurred:\n\n"
+            f"Component being analyzed: {ComponentName}\n"
+            f"Current component value:\n{OriginalComponent}\n\n"
+            f"Misclassified examples:\n"
+            + "\n".join(ErrorExamples)
+            + (f"\n\nAvailable labels: {', '.join(ClassificationLabels)}\n" if ClassificationLabels else "")
+            + f"\n\nProvide a concise analysis of:\n"
+            f"1. Common patterns in the misclassifications\n"
+            f"2. Potential weaknesses in the current component that led to these errors\n"
+            f"3. Specific improvements that could address these issues\n\n"
+            f"Be specific and actionable in your analysis."
+        )
+    }
+    
+    try:
+        Response = Client.chat.completions.create(
+            model=os.getenv("AZURE_OPENAI_DEPLOYMENT"),
+            messages=[SystemMessage, UserMessage],
+            temperature=0.3,
+            max_tokens=300
+        )
+        
+        return Response.choices[0].message.content.strip()
+    except Exception as e:
+        print(f"Error analysis failed: {str(e)}")
+        return "Error analysis unavailable"
 
 def TournamentSelection(Population: List[Dict], FitnessScores: List[float], TournamentSize: int = 3, ReturnIndex: bool = False):
     """
