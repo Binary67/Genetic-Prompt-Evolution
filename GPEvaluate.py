@@ -74,13 +74,9 @@ def EvaluatePrompt(DataFrame: pd.DataFrame, Prompt: Dict, ClassificationLabels: 
             RawPrediction = Response.choices[0].message.content.strip()
             
             # Build regex pattern dynamically from ClassificationLabels
-            if ClassificationLabels:
-                # Create pattern like: \b(compliment|development|neutral)\b
-                LabelPattern = '|'.join(re.escape(label) for label in ClassificationLabels)
-                Pattern = rf'\b({LabelPattern})\b'
-            else:
-                # Fallback to hardcoded pattern if no labels provided
-                Pattern = r'\b(compliment|development)\b'
+
+            LabelPattern = '|'.join(re.escape(label) for label in ClassificationLabels)
+            Pattern = rf'\b({LabelPattern})\b'
                 
             # Search for the first occurrence of any classification label (case-insensitive)
             Match = re.search(Pattern, RawPrediction, re.IGNORECASE)
